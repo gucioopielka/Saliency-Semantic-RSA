@@ -1,4 +1,8 @@
 distractors/
 __pycache__/
 *.out
+<<<<<<< HEAD
 data/coco_dict_train2017
+=======
+.DS_Store
+>>>>>>> c36f8375e87e9afca337bfd46b1c77eb0645543a
