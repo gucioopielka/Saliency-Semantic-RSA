@@ -13,6 +13,19 @@ from scipy.spatial.distance import squareform
 from scipy.stats import spearmanr
 
 
+def get_RDM(arr: np.ndarray) -> np.ndarray:
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        arr = np.stack(arr)
+        return pairwise_distances(np.reshape(arr, (arr.shape[0], -1)), metric='cosine')
+
+
+def compute_RSA(rdm1, 
+                rdm2):
+    """Compute the RSA between two RDMs."""
+    return spearmanr(squareform(rdm1), squareform(rdm2))[0]
+
+
 class RSA:
     def __init__(self, 
                  device: str = 'cpu', 
@@ -194,18 +207,6 @@ class RSA:
             # Recursively get sub-layers
             layers.update(self.get_layers(child, child_prefix, specified_layers))
         return layers
-
-
-    def get_RDM(self, arr):
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-            arr = np.stack(arr)
-            return pairwise_distances(np.reshape(arr, (arr.shape[0], -1)), metric='cosine')
-    
-
-    def compute_RSA(self, rdm1, rdm2):
-        """Compute the RSA between two RDMs."""
-        return spearmanr(squareform(rdm1), squareform(rdm2))[0]
         
 
     def perform_RSA(self, 
@@ -245,7 +246,7 @@ class RSA:
                 for layer_idx in tqdm(range(len(self.layer_specs[model]))):
                     
                     # Convert Features into RDM
-                    feature_rdm = self.get_RDM(act[layer_idx])
+                    feature_rdm = get_RDM(act[layer_idx])
                     
                     # Create dictionary key
                     model_name = self.model_names[model_idx]
@@ -253,8 +254,8 @@ class RSA:
                     key = f"{model_name}_{cond}_{layer_name}"
 
                     # Perform RSA
-                    saliency_RSA[key] = self.compute_RSA(self.saliency_rdm, feature_rdm)
-                    semantic_RSA[key] = self.compute_RSA(self.semantic_rdm, feature_rdm)
+                    saliency_RSA[key] = compute_RSA(self.saliency_rdm, feature_rdm)
+                    semantic_RSA[key] = compute_RSA(self.semantic_rdm, feature_rdm)
                     
                 del act
         

@@ -13,18 +13,6 @@ import os
 import pandas as pd
 import pandas as pd
 import ast
-# n_cores = "12"
-# os.environ["OMP_NUM_THREADS"] = n_cores
-# os.environ["OPENBLAS_NUM_THREADS"] = n_cores
-# os.environ["MKL_NUM_THREADS"] = n_cores
-# os.environ["VECLIB_MAXIMUM_THREADS"] = n_cores
-# os.environ["NUMEXPR_NUM_THREADS"] = n_cores
-
-start, end = int(sys.argv[1]), int(sys.argv[2])
-
-nsd_info = pd.read_csv('/home/c12049018/nsd_stim_info_merged.csv')
-nsd_info = nsd_info[nsd_info['cocoSplit'] == 'train2017']
-nsd_info = nsd_info[['cocoId', 'cropBox']].reset_index()
 
 
 # Pickle load function
@@ -138,134 +126,144 @@ def save_img(img1, img_edit, sem_sim, sal_sim, coordinates, sm):
 
 # Open img
 def open_img(file):
-    return np.array(Image.open(f"/home/Public/Datasets/COCO/{dataset}/{file}"))
-
-dataset = 'train2017'
-
-coco = load(f"/home/c12049018/Documents/Coco-5000/COCO-2017_TRAIN_DICT/coco_dict_{dataset}")
-#cocoids_nsd = nsd_info['cocoId'].to_list()
+    return np.array(Image.open(f"/home/Public/Datasets/COCO/train2017/{file}"))
 
 
-root = "/home/c12049018/Documents/create_images/Distractors"
-ids_found = [i[:-7] for i in os.listdir(f'{root}/Baseline')]
-
-# Thresholds
-semantic_similarity = 0.32
-semantic_dissimilarity = 0.92
-
-non_salient_distractor = 0.019
-salient_distractor = 0.24
-
-
-
-for img1 in range(start, end):
+if __name__ == "__main__":
     
-    id = coco[img1]['file_name'][:-4]
-    if id in ids_found:
-        continue
+    n_cores = "16"
+    os.environ["OMP_NUM_THREADS"] = n_cores
+    os.environ["OPENBLAS_NUM_THREADS"] = n_cores
+    os.environ["MKL_NUM_THREADS"] = n_cores
+    os.environ["VECLIB_MAXIMUM_THREADS"] = n_cores
+    os.environ["NUMEXPR_NUM_THREADS"] = n_cores
 
-    found_imgs = len(os.listdir(f'{root}/Baseline'))
-    print(f'{found_imgs} images found so far.')
+    start, end = int(sys.argv[1]), int(sys.argv[2])
 
-    salient_to_find = True
-    control_to_find = True
-    semantic_salient_to_find = True
-    semantic_to_find = True
+    nsd_info = pd.read_csv('/home/c12049018/nsd_stim_info_merged.csv')
+    nsd_info = nsd_info[nsd_info['cocoSplit'] == 'train2017']
+    nsd_info = nsd_info[['cocoId', 'cropBox']].reset_index()
 
-    # Saliency map org
-    try:
-        img_org = open_img(coco[img1]['file_name'])
-        img_org = applyCropToImg(img_org , getCropBox(img1)) # Crop according to NSD
-        img_org_sm = saliency(img_org)
-    except (ZeroDivisionError, ValueError, IndexError) as error:
-        continue
+    dataset = 'train2017'
 
-    # img_2_idxs = list(range(len(coco)))
-    # np.random.shuffle(img_2_idxs)
-    for img2 in range(len(coco)):  
+    coco = load(f"/home/c12049018/Documents/Coco-5000/COCO-2017_TRAIN_DICT/coco_dict_{dataset}")
+    #cocoids_nsd = nsd_info['cocoId'].to_list()
 
-        # if idx2 > 25000:
-        #     still_to_find = [semantic_salient_to_find, semantic_to_find, salient_to_find, control_to_find]
-        #     print(f"Couldn't find a distractor. Still to find: {still_to_find} distractors.")
-        #     break                             
 
-        # Exclude the diagonal
-        if img1 == img2:
+    root = "/home/c12049018/Documents/create_images/Distractors"
+    ids_found = [i[:-7] for i in os.listdir(f'{root}/Baseline')]
+
+    # Thresholds
+    semantic_similarity = 0.32
+    semantic_dissimilarity = 0.92
+
+    non_salient_distractor = 0.019
+    salient_distractor = 0.24
+
+
+
+    for img1 in range(start, end):
+        
+        id = coco[img1]['file_name'][:-4]
+        if id in ids_found:
             continue
-        
-        sem_sim = distance.cosine(coco[img1]['Avg Text Embedding'], coco[img2]['Avg Text Embedding'])
-        
-        # Semantic similarity
-        if sem_sim < semantic_similarity and any([salient_to_find, control_to_find]): 
 
-            # Edit
-            try:
-                img_distractor = open_img(coco[img2]['file_name'])
-                img_edit, coordinates = paste(img_org, img_distractor)
-            except ValueError:
+        found_imgs = len(os.listdir(f'{root}/Baseline'))
+        print(f'{found_imgs} images found so far.')
+
+        salient_to_find = True
+        control_to_find = True
+        semantic_salient_to_find = True
+        semantic_to_find = True
+
+        # Saliency map org
+        try:
+            img_org = open_img(coco[img1]['file_name'])
+            img_org = applyCropToImg(img_org , getCropBox(img1)) # Crop according to NSD
+            img_org_sm = saliency(img_org)
+        except (ZeroDivisionError, ValueError, IndexError) as error:
+            continue
+
+
+        for img2 in range(len(coco)):  
+
+            # Exclude the diagonal
+            if img1 == img2:
                 continue
             
-            # Saliency map Edit
-            try:
-                img_edit_sm = saliency(img_edit)
-                sal_sim = distance.cosine(img_org_sm.flatten(), img_edit_sm.flatten())
-            except (ZeroDivisionError, ValueError) as error:
-                continue
+            sem_sim = distance.cosine(coco[img1]['Avg Text Embedding'], coco[img2]['Avg Text Embedding'])
             
-            # Non-salient distractor
-            if sal_sim < non_salient_distractor and control_to_find:
-                control_img = save_img(img1, img_edit, sem_sim, sal_sim, coordinates, img_edit_sm)
-                control_to_find = False
+            # Semantic similarity
+            if sem_sim < semantic_similarity and any([salient_to_find, control_to_find]): 
+
+                # Edit
+                try:
+                    img_distractor = open_img(coco[img2]['file_name'])
+                    img_edit, coordinates = paste(img_org, img_distractor)
+                except ValueError:
+                    continue
+                
+                # Saliency map Edit
+                try:
+                    img_edit_sm = saliency(img_edit)
+                    sal_sim = distance.cosine(img_org_sm.flatten(), img_edit_sm.flatten())
+                except (ZeroDivisionError, ValueError) as error:
+                    continue
+                
+                # Non-salient distractor
+                if sal_sim < non_salient_distractor and control_to_find:
+                    control_img = save_img(img1, img_edit, sem_sim, sal_sim, coordinates, img_edit_sm)
+                    control_to_find = False
+                
+                # Salient distractor
+                if sal_sim > salient_distractor and salient_to_find:
+                    salient_img = save_img(img1, img_edit, sem_sim, sal_sim, coordinates, img_edit_sm)
+                    salient_to_find = False
             
-            # Salient distractor
-            if sal_sim > salient_distractor and salient_to_find:
-                salient_img = save_img(img1, img_edit, sem_sim, sal_sim, coordinates, img_edit_sm)
-                salient_to_find = False
-        
-        # Semantic dissimilarity
-        if sem_sim > semantic_dissimilarity and any([semantic_salient_to_find, semantic_to_find]): 
+            # Semantic dissimilarity
+            if sem_sim > semantic_dissimilarity and any([semantic_salient_to_find, semantic_to_find]): 
+                
+                # Edit
+                try:
+                    img_distractor = open_img(coco[img2]['file_name'])
+                    img_edit, coordinates = paste(img_org, img_distractor)            
+                except ValueError:
+                    continue
+
+                #Saliency Map
+                try:
+                    img_edit_sm = saliency(img_edit)
+                    sal_sim = distance.cosine(img_org_sm.flatten(), img_edit_sm.flatten())
+                except ZeroDivisionError:
+                    continue
+                
+                # Non-salient distractor
+                if sal_sim < non_salient_distractor and semantic_to_find:
+                    semantic_img = save_img(img1, img_edit, sem_sim, sal_sim, coordinates, img_edit_sm)
+                    semantic_to_find = False
+
+                # Salient distractor
+                if sal_sim > salient_distractor and semantic_salient_to_find:
+                    semantic_salient_img = save_img(img1, img_edit, sem_sim, sal_sim, coordinates, img_edit_sm)
+                    semantic_salient_to_find = False
             
-            # Edit
-            try:
-                img_distractor = open_img(coco[img2]['file_name'])
-                img_edit, coordinates = paste(img_org, img_distractor)            
-            except ValueError:
-                continue
+            if not any([semantic_salient_to_find, semantic_to_find, salient_to_find, control_to_find]):
+                
+                filename = os.path.splitext(coco[img1]['file_name'])[0]
 
-            #Saliency Map
-            try:
-                img_edit_sm = saliency(img_edit)
-                sal_sim = distance.cosine(img_org_sm.flatten(), img_edit_sm.flatten())
-            except ZeroDivisionError:
-                continue
+                dump(f"{root}/Control/{filename}.pickle", control_img)
+                dump(f"{root}/Salient/{filename}.pickle", salient_img)
+                dump(f"{root}/Semantic/{filename}.pickle", semantic_img)
+                dump(f"{root}/Semantic_Salient/{filename}.pickle", semantic_salient_img)
+
+                baseline = {}
+                baseline['Img'] = img_org
+                baseline['Saliency_Map'] = img_org_sm
+                baseline['Avg Text Embedding'] = coco[img1]['Avg Text Embedding']
+
+                dump(f"{root}/Baseline/{filename}.pickle", baseline)
+
+                print(f"Found! After {img2} iterations.")
+                break
+
             
-            # Non-salient distractor
-            if sal_sim < non_salient_distractor and semantic_to_find:
-                semantic_img = save_img(img1, img_edit, sem_sim, sal_sim, coordinates, img_edit_sm)
-                semantic_to_find = False
-
-            # Salient distractor
-            if sal_sim > salient_distractor and semantic_salient_to_find:
-                semantic_salient_img = save_img(img1, img_edit, sem_sim, sal_sim, coordinates, img_edit_sm)
-                semantic_salient_to_find = False
-        
-        if not any([semantic_salient_to_find, semantic_to_find, salient_to_find, control_to_find]):
-            
-            filename = os.path.splitext(coco[img1]['file_name'])[0]
-
-            dump(f"{root}/Control/{filename}.pickle", control_img)
-            dump(f"{root}/Salient/{filename}.pickle", salient_img)
-            dump(f"{root}/Semantic/{filename}.pickle", semantic_img)
-            dump(f"{root}/Semantic_Salient/{filename}.pickle", semantic_salient_img)
-
-            baseline = {}
-            baseline['Img'] = img_org
-            baseline['Saliency_Map'] = img_org_sm
-            baseline['Avg Text Embedding'] = coco[img1]['Avg Text Embedding']
-
-            dump(f"{root}/Baseline/{filename}.pickle", baseline)
-
-            print(f"Found! After {img2} iterations.")
-            break
-
-        

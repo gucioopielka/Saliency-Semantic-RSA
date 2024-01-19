@@ -1,3 +1,4 @@
 distractors/
 __pycache__/
 *.out
+data/coco_dict_train2017
