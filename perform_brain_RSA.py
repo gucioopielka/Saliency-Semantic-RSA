@@ -76,4 +76,3 @@ for sub_idx, sub in enumerate([1, 2, 3, 4, 5, 6, 8]):
 # Save RSA results
 np.save('data/fmri_sal_RSA', fmri_sal_RSA)
 np.save('data/fmri_sem_RSA', fmri_sem_RSA)
-
