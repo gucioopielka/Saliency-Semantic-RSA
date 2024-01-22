@@ -16,7 +16,6 @@ roi_names, roi_noise_ceilings = roi_names[~np.isnan(sal_RSA_m)], roi_noise_ceili
 sal_RSA_m, sem_RSA_m = sal_RSA_m[~np.isnan(sal_RSA_m)], sem_RSA_m[~np.isnan(sem_RSA_m)]
 sal_RSA_sem, sem_RSA_sem = sal_RSA_sem[~np.isnan(sal_RSA_sem)], sem_RSA_sem[~np.isnan(sem_RSA_sem)]
 
-# increase font size
 plt.rcParams.update({'font.size': 16})
 bar_width = 0.35
 n_groups = len(sal_RSA_m)
@@ -31,3 +30,29 @@ plt.legend(frameon=False)
 plt.show()
 
 
+plt.rcParams.update({'font.size': 16})
+n_groups = len(sal_RSA_m)
+plt.figure(figsize=(12, 5))
+plt.plot(sem_RSA_m,linewidth=3,label='Caption Embeddings', color='teal')
+plt.plot(sal_RSA_m,linewidth=3,label='Saliency Maps', color='firebrick')
+plt.fill_between(range(n_groups), sem_RSA_m-sem_RSA_sem, sem_RSA_m+sem_RSA_sem, alpha=0.3, color='teal')
+plt.fill_between(range(n_groups), sal_RSA_m-sal_RSA_sem, sal_RSA_m+sal_RSA_sem, alpha=0.3, color='firebrick')
+plt.xticks(range(n_groups), roi_names, rotation=70)
+plt.ylabel('RSA', fontsize=16)
+plt.legend(frameon=False, loc='upper left')
+plt.show()
+
+
+plt.rcParams.update({'font.size': 16})
+n_groups = len(sal_RSA_m)
+plt.figure(figsize=(12, 5))
+plt.plot(sem_RSA_m,linewidth=3,label='Caption Embeddings', color='teal')
+plt.plot(sal_RSA_m,linewidth=3,label='Saliency Maps', color='firebrick')
+plt.fill_between(range(n_groups), sem_RSA_m-sem_RSA_sem, sem_RSA_m+sem_RSA_sem, alpha=0.3, color='teal')
+plt.fill_between(range(n_groups), sal_RSA_m-sal_RSA_sem, sal_RSA_m+sal_RSA_sem, alpha=0.3, color='firebrick')
+plt.fill_between(range(n_groups), roi_noise_ceilings[:,0], roi_noise_ceilings[:,1], color='grey', alpha=0.3)
+plt.ylim(-0.03, 0.77)
+plt.xticks(range(n_groups), roi_names, rotation=70)
+plt.ylabel('RSA', fontsize=16)
+plt.legend(frameon=False, loc='upper left')
+plt.show()

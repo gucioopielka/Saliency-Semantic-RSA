@@ -1,400 +1,4 @@
-import os
-import numpy as np
-from matplotlib import pyplot as plt
-import pandas as pd
-import pickle
-import re
-import seaborn as sns
-import re
-os.chdir('/home/c12049018/Documents/Experiment_NEW/Results/crop_test')
-
-conditions = ['Baseline',
-                'Control',
-                'Salient',
-                'Semantic',
-                'Semantic_Salient']
-
-files = os.listdir(os.getcwd())
-
-def load(file):   
-    file = open(file, 'rb')
-    data = pickle.load(file)
-    file.close()
-    return data
-
-def layers(df, cor_type):
-    num_layers = df['layer_type'].nunique()
-    
-    # Using a seaborn color palette
-    colors = sns.color_palette("dark", n_colors=num_layers)
-    color_dict = {layer: color for layer, color in zip(df['layer_type'].unique(), colors)}
-
-    # Create a new figure
-    plt.figure(figsize=(10, 6))
-
-    # Loop through each layer type and plot the bars
-    for layer_type, color in color_dict.items():
-        subset = df[df['layer_type'] == layer_type]
-        plt.bar(subset.index, subset[cor_type], label=layer_type, color=color, alpha=0.7)
-    
-    # Optionally, if you'd like a legend
-    plt.legend(title='Layer Type')
-
-    # Draw vertical lines between blocks
-    previous_block = df['block'].iloc[0]
-    block_ticks = []
-    block_labels = []
-    i_previous = 0  # Initializing i_previous to avoid UnboundLocalError
-    for i, current_block in enumerate(df['block']):
-        if current_block != previous_block:
-            plt.axvline(x=i-0.5, color='k', linestyle='--', alpha=0.6)
-            block_ticks.append((i-1 + i_previous) / 2)
-            block_labels.append(str(previous_block))
-            i_previous = i
-        previous_block = current_block
-
-    # Adding labels and title
-    plt.xlabel('Layer')
-    plt.ylabel('Rho')
-    plt.title(cor_type)
-    ymax = 0.5 if 'sem' in cor_type else 0.3 # df[cor_type].max()
-    plt.ylim((df[cor_type].min(), ymax))
-
-    ax = plt.gca()  # Get current Axes
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_visible(False)
-
-    # Adding custom x-ticks
-    block_ticks.append((i + i_previous) / 2)  # Add last block's middle
-    block_labels.append(str(previous_block))  # Add last block number
-    plt.xticks(block_ticks, block_labels)
-
-    #plt.xticks(ticks=range(len(df['layer_type'])), labels=df['layer_type'], rotation=45)
-    #plt.grid(axis='y')
-    plt.tight_layout()
-
-    plt.show()
-
-def check_condition(layer, cond):
-    # Check if 'Semantic_Salient' is in the input string
-    if cond == 'Semantic' or cond == 'Salient':
-        if cond in layer and 'Semantic_Salient' not in layer:
-            return True
-        else:
-            return False   
-    else:
-        return cond in layer 
-
-
-#%% RN50
-resnet = [i for i in files if 'resnet' in i]
-
-def process_resnet(file):
-
-    rn50 = load(file)
-
-    # Cleaning layer names
-    raw_layers = [i for i in rn50['saliency_RSA'].keys() if 'clip' not in i]
-    n_layers = int(len(raw_layers)/5)
-    raw_layers = raw_layers[:n_layers]
-
-    layer_types = [layer.split('_')[-1].rstrip('0123456789.') for layer in raw_layers]
-    layer_types = [name.split('.')[-1] if '.' in name else name for name in layer_types]
-
-    # Extracting block numbers
-    layer_blocks = []
-    for name in raw_layers:
-        match = re.search(r'layer(\d+)\.', name)
-        if match:
-            layer_blocks.append(match.group(1))
-        else:
-            layer_blocks.append(None)
-    layer_blocks[:4] = ['pre_res_block']*4
-    layer_blocks[-1] = 'post_res_block' 
-
-    # Extracting bottleneck number
-    bottleneck_number = []
-    for name in raw_layers:
-        match = re.search(r'layer(\d+)\.(.+?)(?:\.|$)', name)
-        if match:
-            bottleneck_number.append(match.group(2))
-        else:
-            bottleneck_number.append(None)
-    bottleneck_number[:4] = ['pre_res_block']*4
-    bottleneck_number[-1] = 'post_res_block' 
-
-
-    rn50_df = pd.DataFrame({
-                'model' : file[:-4],
-                'layer_type' : layer_types,
-                'block' : layer_blocks, 
-                'bottleneck_number' : bottleneck_number,
-                'sal_Baseline' : np.zeros(n_layers),
-                'sem_Baseline' : np.zeros(n_layers),
-                'sal_Control' : np.zeros(n_layers),
-                'sem_Control' : np.zeros(n_layers),
-                'sal_Salient' : np.zeros(n_layers),
-                'sem_Salient' : np.zeros(n_layers),              
-                'sal_Semantic' : np.zeros(n_layers),
-                'sem_Semantic' : np.zeros(n_layers), 
-                'sal_Semantic_Salient' : np.zeros(n_layers),
-                'sem_Semantic_Salient' : np.zeros(n_layers), 
-                })
-
-    # Key pairs to iterate over both conditions
-    key_pairs = [('sal', 'saliency_RSA'), ('sem', 'semantic_RSA')]
-
-    # Iterate over both pairs
-    for col_prefix, rsa_key in key_pairs:
-        # Extract relevant layers and values based on the condition, excluding 'clip'
-        relevant_vals = {layer: val for layer, val in rn50[rsa_key].items() if 'clip' not in layer}
-        
-        for cond in conditions:
-            # Filter the relevant layers/values based on another condition
-            filtered_vals = {layer: val for layer, val in relevant_vals.items() if check_condition(layer, cond)}
-            
-            # Assign the values to the dataframe
-            for idx, (layer, val) in enumerate(filtered_vals.items()):
-                rn50_df.loc[idx, f'{col_prefix}_{cond}'] = val 
-
-    # Loop over each column type (sal and sem)
-    for col_type in ['sal', 'sem']:
-        baseline_col = f"{col_type}_Baseline"
-        # Iterate over the other columns with the same type
-        for col in rn50_df.columns:
-            if col.startswith(col_type) and col != baseline_col:
-                rn50_df[col] -= rn50_df[baseline_col]
-    
-    return rn50_df
-
-resnet_df = pd.DataFrame()
-for file in resnet:
-    df = process_resnet(file)
-    resnet_df = pd.concat([resnet_df, df])
-
-#%% CLIP RN50
-
-def preprocess_clip_resnet(file):
-    rn50 = load(file)
-
-    # Cleaning layer names
-    raw_layers = [i for i in rn50['saliency_RSA'].keys() if 'clip' in i]
-    n_layers = int(len(raw_layers)/5)
-    raw_layers = raw_layers[:n_layers]
-
-    layer_types = [layer.split('_')[-1].rstrip('0123456789-.') for layer in raw_layers]
-    layer_types = [name.split('.')[-1] if '.' in name else name for name in layer_types]
-
-    # Extracting block numbers
-    layer_blocks = []
-    for name in raw_layers:
-        match = re.search(r'layer(\d+)\.', name)
-        if match:
-            layer_blocks.append(match.group(1))
-        else:
-            layer_blocks.append(None)
-    layer_blocks[:10] = ['pre_res_block']*10
-
-    # Extracting bottleneck number
-    bottleneck_number = []
-    for name in raw_layers:
-        match = re.search(r'layer(\d+)\.(.+?)(?:\.|$)', name)
-        if match:
-            bottleneck_number.append(match.group(2))
-        else:
-            bottleneck_number.append(None)
-    bottleneck_number[:10] = ['pre_res_block']*10
-
-    clip_rn50_df = pd.DataFrame({
-                'model' : 'clip_'+file[:-4],
-                'layer_type' : layer_types,
-                'block' : layer_blocks, 
-                'bottleneck_number' : bottleneck_number,
-                'sal_Baseline' : np.zeros(n_layers),
-                'sem_Baseline' : np.zeros(n_layers),
-                'sal_Control' : np.zeros(n_layers),
-                'sem_Control' : np.zeros(n_layers),
-                'sal_Salient' : np.zeros(n_layers),
-                'sem_Salient' : np.zeros(n_layers),              
-                'sal_Semantic' : np.zeros(n_layers),
-                'sem_Semantic' : np.zeros(n_layers), 
-                'sal_Semantic_Salient' : np.zeros(n_layers),
-                'sem_Semantic_Salient' : np.zeros(n_layers), 
-                })
-
-    # Key pairs to iterate over both conditions
-    key_pairs = [('sal', 'saliency_RSA'), ('sem', 'semantic_RSA')]
-
-    # Iterate over both pairs
-    for col_prefix, rsa_key in key_pairs:
-        # Extract relevant layers and values based on the condition, excluding 'clip'
-        relevant_vals = {layer: val for layer, val in rn50[rsa_key].items() if 'clip' in layer}
-        
-        for cond in conditions:
-            # Filter the relevant layers/values based on another condition
-            filtered_vals = {layer: val for layer, val in relevant_vals.items() if check_condition(layer, cond)}
-            
-            # Assign the values to the dataframe
-            for idx, (layer, val) in enumerate(filtered_vals.items()):
-                clip_rn50_df.loc[idx, f'{col_prefix}_{cond}'] = val 
-
-    # Loop over each column type (sal and sem)
-    for col_type in ['sal', 'sem']:
-        baseline_col = f"{col_type}_Baseline"
-        # Iterate over the other columns with the same type
-        for col in clip_rn50_df.columns:
-            if col.startswith(col_type) and col != baseline_col:
-                clip_rn50_df[col] -= clip_rn50_df[baseline_col]
-
-    return clip_rn50_df
-
-Clip_resnet_df = pd.DataFrame()
-for file in resnet:
-    df = preprocess_clip_resnet(file)
-    Clip_resnet_df = pd.concat([Clip_resnet_df, df])
-
-#%% VIT
-
-vit = [i for i in files if 'vit' in i]
-
-def preprocess_vit(file):
-
-    vit = load(file)               
-    saliency = [val for layer, val in vit['saliency_RSA'].items() if 'clip' not in layer]
-    semantic = [val for layer, val in vit['semantic_RSA'].items() if 'clip' not in layer]
-
-    # Layer Names
-    raw_layers = [i for i in vit['saliency_RSA'].keys() if 'clip' not in i]
-    raw_layers[:2] = ['Baseline_pre_att.conv', 'Baseline_pre_att.dropout']
-    n_layers = int(len(raw_layers)/5)
-    raw_layers = raw_layers[:n_layers]
-
-    layer_types = [layer.rstrip('_.0123456789') for layer in raw_layers]
-    layer_types = [name.split('.')[-1] if '.' in name else name for name in layer_types]
-
-    # Layer numbers
-    layer_nums = []
-    for name in raw_layers:
-        match = re.search(r'layer_(\d+)\.', name)
-        if match:
-            layer_nums.append(int(match.group(1))+1)
-        else:
-            layer_nums.append(None)
-    layer_nums[:2], layer_nums[-2:] = ['pre_att']*2,['post_att']*2
-
-    vit_df = pd.DataFrame({
-                'model' : 'vit',
-                'layer_type' : layer_types,
-                'block' : layer_nums, 
-                'bottleneck_number' : np.full(n_layers, np.nan),
-                'sal_Baseline' : np.zeros(n_layers),
-                'sem_Baseline' : np.zeros(n_layers),
-                'sal_Control' : np.zeros(n_layers),
-                'sem_Control' : np.zeros(n_layers),
-                'sal_Salient' : np.zeros(n_layers),
-                'sem_Salient' : np.zeros(n_layers),              
-                'sal_Semantic' : np.zeros(n_layers),
-                'sem_Semantic' : np.zeros(n_layers), 
-                'sal_Semantic_Salient' : np.zeros(n_layers),
-                'sem_Semantic_Salient' : np.zeros(n_layers), 
-                })
-    
-    key_pairs = [('sal', 'saliency_RSA'), ('sem', 'semantic_RSA')]
-
-    # Iterate over both pairs
-    for col_prefix, rsa_key in key_pairs:
-        # Extract relevant layers and values based on the condition, excluding 'clip'
-        relevant_vals = {layer: val for layer, val in vit[rsa_key].items() if 'clip' not in layer}
-        
-        for cond in conditions:
-            # Filter the relevant layers/values based on another condition
-            filtered_vals = {layer: val for layer, val in relevant_vals.items() if check_condition(layer, cond)}
-            # Assign the values to the dataframe
-            for idx, (layer, val) in enumerate(filtered_vals.items()):
-                vit_df.loc[idx, f'{col_prefix}_{cond}'] = val 
-
-    # Loop over each column type (sal and sem)
-    for col_type in ['sal', 'sem']:
-        baseline_col = f"{col_type}_Baseline"
-        # Iterate over the other columns with the same type
-        for col in vit_df.columns:
-            if col.startswith(col_type) and col != baseline_col:
-                vit_df[col] -= vit_df[baseline_col]
-
-vit_df = pd.DataFrame()
-for file in vit:
-    df = preprocess_vit(file)
-    vit_df = pd.concat([vit_df, df])
-
-#%% CLIP VIT
-vit = load('vit.pkl')               
-saliency = [val for layer, val in vit['saliency_RSA'].items() if 'clip' in layer]
-semantic = [val for layer, val in vit['semantic_RSA'].items() if 'clip' in layer]
-
-# Layer Names
-raw_layers = [i for i in vit['saliency_RSA'].keys() if 'clip' in i]
-raw_layers[:2] = ['pre_att.conv', 'pre_att.dropout']
-n_layers = int(len(raw_layers)/5)
-raw_layers = raw_layers[:n_layers]
-
-layer_types = [layer.rstrip('_.0123456789') for layer in raw_layers]
-layer_types = [name.split('.')[-1] if '.' in name else name for name in layer_types]
-
-# Layer numbers
-layer_nums = []
-for name in raw_layers:
-    match = re.search(r'resblocks.(\d+)\.', name)
-    if match:
-        layer_nums.append(int(match.group(1))+1)
-    else:
-        layer_nums.append(None)
-layer_nums[:2], layer_nums[-1] = ['pre_att']*2, 'post_att'
-
-clip_vit_df = pd.DataFrame({
-            'model' : 'clip_vit',
-            'layer_type' : layer_types,
-            'block' : layer_nums, 
-            'bottleneck_number' : np.full(n_layers, np.nan),
-            'sal_Baseline' : np.zeros(n_layers),
-            'sem_Baseline' : np.zeros(n_layers),
-            'sal_Control' : np.zeros(n_layers),
-            'sem_Control' : np.zeros(n_layers),
-            'sal_Salient' : np.zeros(n_layers),
-            'sem_Salient' : np.zeros(n_layers),              
-            'sal_Semantic' : np.zeros(n_layers),
-            'sem_Semantic' : np.zeros(n_layers), 
-            'sal_Semantic_Salient' : np.zeros(n_layers),
-            'sem_Semantic_Salient' : np.zeros(n_layers), 
-            })
-
-clip_vit_df = clip_vit_df.replace(['c_fc', 'c_proj'], 'mlp')    
-
-# Iterate over both pairs
-for col_prefix, rsa_key in key_pairs:
-    # Extract relevant layers and values based on the condition, excluding 'clip'
-    relevant_vals = {layer: val for layer, val in vit[rsa_key].items() if 'clip' in layer}
-    
-    for cond in conditions:
-        # Filter the relevant layers/values based on another condition
-        filtered_vals = {layer: val for layer, val in relevant_vals.items() if check_condition(layer, cond)}
-        
-        # Assign the values to the dataframe
-        for idx, (layer, val) in enumerate(filtered_vals.items()):
-            clip_vit_df.loc[idx, f'{col_prefix}_{cond}'] = val 
-
-# Loop over each column type (sal and sem)
-for col_type in ['sal', 'sem']:
-    baseline_col = f"{col_type}_Baseline"
-    # Iterate over the other columns with the same type
-    for col in clip_vit_df.columns:
-        if col.startswith(col_type) and col != baseline_col:
-            clip_vit_df[col] -= clip_vit_df[baseline_col]
-
-
 # %%
-sal_sem_df = pd.concat([rn50_df, clip_rn50_df, vit_df, clip_vit_df]).reset_index()
-sal_sem_df = pd.concat([resnet_df, Clip_resnet_df]).reset_index()
 import os
 import numpy as np
 from matplotlib import pyplot as plt
@@ -408,6 +12,8 @@ from scipy.stats import ks_2samp
 from scipy.stats import mannwhitneyu
 from scipy.stats import wilcoxon
 from scipy.stats import ttest_rel
+import matplotlib.lines as mlines
+
 
 def load(file):   
     file = open(file, 'rb')
@@ -510,8 +116,240 @@ def layers(df, cor_type):
 # Plotting baselines
 
 
+nans = 0
+for i in range(len(df)):
+
+    if 'rn' not in df['model'][i]:
+        continue
+
+    current_model = df['model'][i]
+    current_block = df['block'][i]
+    if np.isnan(df['block'][i]):
+        nans += 1
+
+    
+
+
+    df['model'][i] = 'clip_' + df['model'][i]
+
+
+
+
+
+df = pd.read_csv('data/model_RSA.csv')
+
+model_names = ['rn50','clip_rn50', 'rn101','clip_rn101']
+# drop nans
+df = df[~df['block'].isna()]
+
+
+
+df_subset = df[(df['model'] == 'rn50') | (df['model'] == 'clip_rn50')]
+grouped_sem = df_subset.groupby(['model','block', 'bottleneck_number'])['sem_Baseline'].mean().reset_index()
+grouped_sal = df_subset.groupby(['model','block', 'bottleneck_number'])['sal_Baseline'].mean().reset_index()
+grouped_sem_std = df_subset.groupby(['model','block', 'bottleneck_number'])['sem_Baseline'].sem().reset_index()
+grouped_sal_std = df_subset.groupby(['model','block', 'bottleneck_number'])['sal_Baseline'].sem().reset_index()
+
+grouped_sem_in, grouped_sem_clip = grouped_sem[grouped_sem['model'] == 'rn50'].reset_index(), grouped_sem[grouped_sem['model'] == 'clip_rn50'].reset_index()
+grouped_sal_in, grouped_sal_clip = grouped_sal[grouped_sal['model'] == 'rn50'].reset_index().reset_index(), grouped_sal[grouped_sal['model'] == 'clip_rn50'].reset_index()
+grouped_sem_std_in, grouped_sem_std_clip = grouped_sem_std[grouped_sem_std['model'] == 'rn50'].reset_index(), grouped_sem_std[grouped_sem_std['model'] == 'clip_rn50'].reset_index()
+grouped_sal_std_in, grouped_sal_std_clip = grouped_sal_std[grouped_sal_std['model'] == 'rn50'].reset_index(), grouped_sal_std[grouped_sal_std['model'] == 'clip_rn50'].reset_index()
+
+plt.rcParams.update({'font.size': 25})
+bar_width = 0.35
+n_groups = len(grouped_sem_in)
+plt.figure(figsize=(15, 8))
+plt.ylim(-0.3, 0.5)
+
+plt.plot(grouped_sem_in['sem_Baseline'], color='teal', label='Caption Embeddings', linewidth=3, linestyle='dotted')
+plt.plot(grouped_sal_in['sal_Baseline'], color='firebrick', label='Saliency Maps', linewidth=3, linestyle='dotted')
+plt.plot(grouped_sem_clip['sem_Baseline'], color='teal', linewidth=3)
+plt.plot(grouped_sal_clip['sal_Baseline'], color='firebrick', linewidth=3)
+
+plt.fill_between(range(n_groups), grouped_sem_in['sem_Baseline'] - grouped_sem_std_in['sem_Baseline'], grouped_sem_in['sem_Baseline'] + grouped_sem_std_in['sem_Baseline'], color='teal', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sal_in['sal_Baseline'] - grouped_sal_std_in['sal_Baseline'], grouped_sal_in['sal_Baseline'] + grouped_sal_std_in['sal_Baseline'], color='firebrick', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sem_clip['sem_Baseline'] - grouped_sem_std_clip['sem_Baseline'], grouped_sem_clip['sem_Baseline'] + grouped_sem_std_clip['sem_Baseline'], color='teal', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sal_clip['sal_Baseline'] - grouped_sal_std_clip['sal_Baseline'], grouped_sal_clip['sal_Baseline'] + grouped_sal_std_clip['sal_Baseline'], color='firebrick', alpha=0.2)
+
+plt.xticks(range(n_groups), list(range(1,n_groups+1)))
+plt.ylabel('RSA')
+plt.title('ResNet-50')
+caption_embedding_line = mlines.Line2D([], [], color='teal', label='Caption Embeddings', linewidth=3)
+saliency_map_line = mlines.Line2D([], [], color='firebrick', label='Saliency Maps', linewidth=3)
+clip_line = mlines.Line2D([], [], color='black', label='CLIP', linewidth=3)
+imagenet_line = mlines.Line2D([], [], color='black', label='Supervised', linewidth=3, linestyle='--')
+plt.legend(handles=[clip_line, imagenet_line], frameon=False)
+plt.show()
+
+
+models = ['rn101', 'clip_rn101']
+df_subset = df[(df['model'] == models[0]) | (df['model'] == models[1])]
+grouped_sem = df_subset.groupby(['model','block', 'bottleneck_number'])['sem_Baseline'].mean().reset_index()
+grouped_sal = df_subset.groupby(['model','block', 'bottleneck_number'])['sal_Baseline'].mean().reset_index()
+grouped_sem_std = df_subset.groupby(['model','block', 'bottleneck_number'])['sem_Baseline'].sem().reset_index()
+grouped_sal_std = df_subset.groupby(['model','block', 'bottleneck_number'])['sal_Baseline'].sem().reset_index()
+
+grouped_sem_in, grouped_sem_clip = grouped_sem[grouped_sem['model'] == models[0]].reset_index(), grouped_sem[grouped_sem['model'] == models[1]].reset_index()
+grouped_sal_in, grouped_sal_clip = grouped_sal[grouped_sal['model'] == models[0]].reset_index().reset_index(), grouped_sal[grouped_sal['model'] == models[1]].reset_index()
+grouped_sem_std_in, grouped_sem_std_clip = grouped_sem_std[grouped_sem_std['model'] == models[0]].reset_index(), grouped_sem_std[grouped_sem_std['model'] == models[1]].reset_index()
+grouped_sal_std_in, grouped_sal_std_clip = grouped_sal_std[grouped_sal_std['model'] == models[0]].reset_index(), grouped_sal_std[grouped_sal_std['model'] == models[1]].reset_index()
+
+plt.rcParams.update({'font.size': 25})
+bar_width = 0.35
+n_groups = len(grouped_sem_in)
+plt.figure(figsize=(15, 8))
+plt.ylim(-0.3, 0.5)
+
+plt.plot(grouped_sem_in['sem_Baseline'], color='steelblue', label='Caption Embeddings', linewidth=3, linestyle='--')
+plt.plot(grouped_sal_in['sal_Baseline'], color='indianred', label='Saliency Maps', linewidth=3, linestyle='--')
+plt.plot(grouped_sem_clip['sem_Baseline'], color='steelblue', linewidth=3)
+plt.plot(grouped_sal_clip['sal_Baseline'], color='indianred', linewidth=3)
+
+plt.fill_between(range(n_groups), grouped_sem_in['sem_Baseline'] - grouped_sem_std_in['sem_Baseline'], grouped_sem_in['sem_Baseline'] + grouped_sem_std_in['sem_Baseline'], color='steelblue', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sal_in['sal_Baseline'] - grouped_sal_std_in['sal_Baseline'], grouped_sal_in['sal_Baseline'] + grouped_sal_std_in['sal_Baseline'], color='indianred', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sem_clip['sem_Baseline'] - grouped_sem_std_clip['sem_Baseline'], grouped_sem_clip['sem_Baseline'] + grouped_sem_std_clip['sem_Baseline'], color='steelblue', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sal_clip['sal_Baseline'] - grouped_sal_std_clip['sal_Baseline'], grouped_sal_clip['sal_Baseline'] + grouped_sal_std_clip['sal_Baseline'], color='indianred', alpha=0.2)
+
+plt.xticks(range(n_groups), [], )
+plt.ylabel('RSA')
+#plt.title(model)
+plt.legend(frameon=False)
+plt.show()
+
+
+# Delta
+condition = 'sal_Salient'
+condition2 = 'sem_Salient'
+df_subset = df[(df['model'] == 'rn50') | (df['model'] == 'clip_rn50')]
+grouped_sal = df_subset.groupby(['model','block', 'bottleneck_number'])[condition].mean().abs().reset_index()
+grouped_sal_std = df_subset.groupby(['model','block', 'bottleneck_number'])[condition].sem().reset_index()
+grouped_sem = df_subset.groupby(['model','block', 'bottleneck_number'])[condition2].mean().abs().reset_index()
+grouped_sem_std = df_subset.groupby(['model','block', 'bottleneck_number'])[condition2].sem().reset_index()
+
+grouped_sal_in, grouped_sal_clip = grouped_sal[grouped_sal['model'] == 'rn50'].reset_index().reset_index(), grouped_sal[grouped_sal['model'] == 'clip_rn50'].reset_index()
+grouped_sal_std_in, grouped_sal_std_clip = grouped_sal_std[grouped_sal_std['model'] == 'rn50'].reset_index(), grouped_sal_std[grouped_sal_std['model'] == 'clip_rn50'].reset_index()
+grouped_sem_in, grouped_sem_clip = grouped_sem[grouped_sem['model'] == 'rn50'].reset_index(), grouped_sem[grouped_sem['model'] == 'clip_rn50'].reset_index()
+grouped_sem_std_in, grouped_sem_std_clip = grouped_sem_std[grouped_sem_std['model'] == 'rn50'].reset_index(), grouped_sem_std[grouped_sem_std['model'] == 'clip_rn50'].reset_index()
+
+plt.rcParams.update({'font.size': 25})
+bar_width = 0.35
+n_groups = len(grouped_sal_in)
+plt.figure(figsize=(15, 8))
+plt.ylim(0, 0.05)
+
+plt.plot(grouped_sal_in[condition], color='firebrick', label='Saliency Maps', linewidth=3, linestyle='--')
+plt.plot(grouped_sal_clip[condition], color='firebrick', linewidth=3)
+plt.plot(grouped_sem_in[condition2], color='teal', label='Caption Embeddings', linewidth=3, linestyle='--')
+plt.plot(grouped_sem_clip[condition2], color='teal', linewidth=3)
+
+plt.fill_between(range(n_groups), grouped_sal_in[condition] - grouped_sal_std_in[condition], grouped_sal_in[condition] + grouped_sal_std_in[condition], color='firebrick', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sal_clip[condition] - grouped_sal_std_clip[condition], grouped_sal_clip[condition] + grouped_sal_std_clip[condition], color='firebrick', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sem_in[condition2] - grouped_sem_std_in[condition2], grouped_sem_in[condition2] + grouped_sem_std_in[condition2], color='teal', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sem_clip[condition2] - grouped_sem_std_clip[condition2], grouped_sem_clip[condition2] + grouped_sem_std_clip[condition2], color='teal', alpha=0.2)
+
+
+
+plt.xticks(range(n_groups), list(range(1,n_groups+1)))
+plt.ylabel('RSA')
+plt.title('ResNet-50')
+caption_embedding_line = mlines.Line2D([], [], color='teal', label='Caption Embeddings', linewidth=3)
+saliency_map_line = mlines.Line2D([], [], color='firebrick', label='Saliency Maps', linewidth=3)
+clip_line = mlines.Line2D([], [], color='black', label='CLIP', linewidth=3)
+imagenet_line = mlines.Line2D([], [], color='black', label='Supervised', linewidth=3, linestyle='--')
+plt.legend(handles=[clip_line, imagenet_line], frameon=False)
+plt.show()
+
+
+
+
+
+
+
+models = ['vit_b16', 'clip_vit_b16']
+df_subset = df[(df['model'] == models[0]) | (df['model'] == models[1])]
+grouped_sem = df_subset.groupby(['model','block'])['sem_Baseline'].mean().reset_index()
+grouped_sal = df_subset.groupby(['model','block'])['sal_Baseline'].mean().reset_index()
+grouped_sem_std = df_subset.groupby(['model','block'])['sem_Baseline'].sem().reset_index()
+grouped_sal_std = df_subset.groupby(['model','block'])['sal_Baseline'].sem().reset_index()
+
+grouped_sem_in, grouped_sem_clip = grouped_sem[grouped_sem['model'] == models[0]].reset_index(), grouped_sem[grouped_sem['model'] == models[1]].reset_index()
+grouped_sal_in, grouped_sal_clip = grouped_sal[grouped_sal['model'] == models[0]].reset_index().reset_index(), grouped_sal[grouped_sal['model'] == models[1]].reset_index()
+grouped_sem_std_in, grouped_sem_std_clip = grouped_sem_std[grouped_sem_std['model'] == models[0]].reset_index(), grouped_sem_std[grouped_sem_std['model'] == models[1]].reset_index()
+grouped_sal_std_in, grouped_sal_std_clip = grouped_sal_std[grouped_sal_std['model'] == models[0]].reset_index(), grouped_sal_std[grouped_sal_std['model'] == models[1]].reset_index()
+
+plt.rcParams.update({'font.size': 25})
+bar_width = 0.35
+n_groups = len(grouped_sem_in)
+plt.figure(figsize=(15, 8))
+plt.ylim(-0.3, 0.5)
+
+plt.plot(grouped_sem_in['sem_Baseline'], color='teal', label='Caption Embeddings', linewidth=3, linestyle='--')
+plt.plot(grouped_sal_in['sal_Baseline'], color='firebrick', label='Saliency Maps', linewidth=3, linestyle='--')
+plt.plot(grouped_sem_clip['sem_Baseline'], color='teal', linewidth=3)
+plt.plot(grouped_sal_clip['sal_Baseline'], color='firebrick', linewidth=3)
+
+plt.fill_between(range(n_groups), grouped_sem_in['sem_Baseline'] - grouped_sem_std_in['sem_Baseline'], grouped_sem_in['sem_Baseline'] + grouped_sem_std_in['sem_Baseline'], color='teal', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sal_in['sal_Baseline'] - grouped_sal_std_in['sal_Baseline'], grouped_sal_in['sal_Baseline'] + grouped_sal_std_in['sal_Baseline'], color='firebrick', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sem_clip['sem_Baseline'] - grouped_sem_std_clip['sem_Baseline'], grouped_sem_clip['sem_Baseline'] + grouped_sem_std_clip['sem_Baseline'], color='teal', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sal_clip['sal_Baseline'] - grouped_sal_std_clip['sal_Baseline'], grouped_sal_clip['sal_Baseline'] + grouped_sal_std_clip['sal_Baseline'], color='firebrick', alpha=0.2)
+
+plt.xticks(range(n_groups), list(range(1,n_groups+1)))
+plt.ylabel('RSA')
+plt.title('ViT-B/16')
+caption_embedding_line = mlines.Line2D([], [], color='teal', label='Caption Embeddings', linewidth=3)
+saliency_map_line = mlines.Line2D([], [], color='firebrick', label='Saliency Maps', linewidth=3)
+clip_line = mlines.Line2D([], [], color='black', label='CLIP', linewidth=3, linestyle='--')
+imagenet_line = mlines.Line2D([], [], color='black', label='Supervised', linewidth=3)
+plt.legend(handles=[clip_line, imagenet_line], frameon=False)
+plt.show()
+
+
+
+models = ['vit_l14', 'clip_vit_l14']
+df_subset = df[(df['model'] == models[0]) | (df['model'] == models[1])]
+grouped_sem = df_subset.groupby(['model','block'])['sem_Baseline'].mean().reset_index()
+grouped_sal = df_subset.groupby(['model','block'])['sal_Baseline'].mean().reset_index()
+grouped_sem_std = df_subset.groupby(['model','block'])['sem_Baseline'].sem().reset_index()
+grouped_sal_std = df_subset.groupby(['model','block'])['sal_Baseline'].sem().reset_index()
+
+grouped_sem_in, grouped_sem_clip = grouped_sem[grouped_sem['model'] == models[0]].reset_index(), grouped_sem[grouped_sem['model'] == models[1]].reset_index()
+grouped_sal_in, grouped_sal_clip = grouped_sal[grouped_sal['model'] == models[0]].reset_index().reset_index(), grouped_sal[grouped_sal['model'] == models[1]].reset_index()
+grouped_sem_std_in, grouped_sem_std_clip = grouped_sem_std[grouped_sem_std['model'] == models[0]].reset_index(), grouped_sem_std[grouped_sem_std['model'] == models[1]].reset_index()
+grouped_sal_std_in, grouped_sal_std_clip = grouped_sal_std[grouped_sal_std['model'] == models[0]].reset_index(), grouped_sal_std[grouped_sal_std['model'] == models[1]].reset_index()
+
+plt.rcParams.update({'font.size': 25})
+bar_width = 0.35
+n_groups = len(grouped_sem_in)
+plt.figure(figsize=(15, 8))
+plt.ylim(-0.3, 0.5)
+
+plt.plot(grouped_sem_in['sem_Baseline'], color='teal', label='Caption Embeddings', linewidth=3, linestyle='--')
+plt.plot(grouped_sal_in['sal_Baseline'], color='firebrick', label='Saliency Maps', linewidth=3, linestyle='--')
+plt.plot(grouped_sem_clip['sem_Baseline'], color='teal', linewidth=3)
+plt.plot(grouped_sal_clip['sal_Baseline'], color='firebrick', linewidth=3)
+
+plt.fill_between(range(n_groups), grouped_sem_in['sem_Baseline'] - grouped_sem_std_in['sem_Baseline'], grouped_sem_in['sem_Baseline'] + grouped_sem_std_in['sem_Baseline'], color='teal', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sal_in['sal_Baseline'] - grouped_sal_std_in['sal_Baseline'], grouped_sal_in['sal_Baseline'] + grouped_sal_std_in['sal_Baseline'], color='firebrick', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sem_clip['sem_Baseline'] - grouped_sem_std_clip['sem_Baseline'], grouped_sem_clip['sem_Baseline'] + grouped_sem_std_clip['sem_Baseline'], color='teal', alpha=0.2)
+plt.fill_between(range(n_groups), grouped_sal_clip['sal_Baseline'] - grouped_sal_std_clip['sal_Baseline'], grouped_sal_clip['sal_Baseline'] + grouped_sal_std_clip['sal_Baseline'], color='firebrick', alpha=0.2)
+
+plt.xticks(range(n_groups), list(range(1,n_groups+1)))
+plt.ylabel('RSA')
+plt.title('ViT-B/16')
+caption_embedding_line = mlines.Line2D([], [], color='teal', label='Caption Embeddings', linewidth=3)
+saliency_map_line = mlines.Line2D([], [], color='firebrick', label='Saliency Maps', linewidth=3)
+clip_line = mlines.Line2D([], [], color='black', label='CLIP', linewidth=3, linestyle='--')
+imagenet_line = mlines.Line2D([], [], color='black', label='Supervised', linewidth=3)
+plt.legend(handles=[clip_line, imagenet_line], frameon=False)
+plt.show()
+
+
+
+
+
 #%% Histograms
-df = sal_sem_df
+    
+df = pd.read_csv('data/model_RSA.csv')
 
 colors = {
     'vit': '#209596',
