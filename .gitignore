@@ -3,3 +3,5 @@ __pycache__/
 *.out
 data/coco_dict_train2017
 .DS_Store
+NSD_shared_images/
+data/model_rdms_raw.pkl
